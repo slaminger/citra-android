@@ -143,6 +143,10 @@
     <string name="loader_error_invalid_format">Invalid ROM format</string>
 
     <!-- Emulation Menu -->
+    <string name="emulation_save_state">Save State</string>
+    <string name="emulation_load_state">Load State</string>
+    <string name="emulation_empty_state_slot">Slot %1$d</string>
+    <string name="emulation_occupied_state_slot">Slot %1$d - %2$tF %2$tR</string>
     <string name="emulation_show_fps">Show FPS</string>
     <string name="emulation_configure_controls">Configure Controls</string>
     <string name="emulation_edit_layout">Edit Layout</string>
@@ -177,6 +181,10 @@
     <string name="select_dir">Select This Directory</string>
     <string name="empty_gamelist">No files were found or no game directory has been selected yet.</string>
 
+    <string name="do_not_show_this_again">Do not show this again</string>
+    <string name="savestate_warning_title">Savestates</string>
+    <string name="savestate_warning_message">Warning: Savestates are NOT a replacement for in-game saves, and are not meant to be reliable.\n\nUse at your own risk!</string>
+
     <!-- Software Keyboard -->
     <string name="software_keyboard">Software Keyboard</string>
     <string name="i_forgot">I Forgot</string>
@@ -197,4 +205,14 @@
     <!-- Microphone -->
     <string name="microphone">Microphone</string>
     <string name="microphone_permission_needed">Citra needs to access your microphone to emulate the 3DS\'s microphone.\n\nAlternatively, you can also change \"Audio Input Device\" in Audio Settings.</string>
+
+    <!-- Core Errors -->
+    <string name="abort_button">Abort</string>
+    <string name="continue_button">Continue</string>
+    <string name="system_archive_not_found">System Archive Not Found</string>
+    <string name="system_archive_not_found_message">%s is missing. Please dump your system archives.\nContinuing emulation may result in crashes and bugs.</string>
+    <string name="system_archive_general">A system archive</string>
+    <string name="save_load_error">Save/Load Error</string>
+    <string name="fatal_error">Fatal Error</string>
+    <string name="fatal_error_message">A fatal error occurred. Check the log for details.\nContinuing emulation may result in crashes and bugs.</string>
 </resources>

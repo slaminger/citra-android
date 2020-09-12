@@ -6,8 +6,11 @@
 
 package org.citra.citra_emu;
 
+import android.app.Activity;
+import android.app.Dialog;
 import android.content.pm.PackageManager;
 import android.content.res.Configuration;
+import android.os.Bundle;
 import android.text.Html;
 import android.text.method.LinkMovementMethod;
 import android.view.Surface;
@@ -16,15 +19,21 @@ import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
 import androidx.core.content.ContextCompat;
+import androidx.fragment.app.DialogFragment;
 
 import org.citra.citra_emu.activities.EmulationActivity;
+import org.citra.citra_emu.applets.SoftwareKeyboard;
 import org.citra.citra_emu.utils.EmulationMenuSettings;
 import org.citra.citra_emu.utils.Log;
 import org.citra.citra_emu.utils.PermissionsHandler;
 
 import java.lang.ref.WeakReference;
+import java.util.Date;
+import java.util.Objects;
 
 import static android.Manifest.permission.CAMERA;
 import static android.Manifest.permission.RECORD_AUDIO;
@@ -208,6 +217,114 @@ public final class NativeLibrary {
      * Swaps the top and bottom screens.
      */
     public static native void SwapScreens(boolean swap_screens, int rotation);
+
+    public enum CoreError {
+        ErrorSystemFiles,
+        ErrorSavestate,
+        ErrorUnknown,
+    }
+
+    private static boolean coreErrorAlertResult = false;
+    private static final Object coreErrorAlertLock = new Object();
+
+    public static class CoreErrorDialogFragment extends DialogFragment {
+        static CoreErrorDialogFragment newInstance(String title, String message) {
+            CoreErrorDialogFragment frag = new CoreErrorDialogFragment();
+            Bundle args = new Bundle();
+            args.putString("title", title);
+            args.putString("message", message);
+            frag.setArguments(args);
+            return frag;
+        }
+
+        @NonNull
+        @Override
+        public Dialog onCreateDialog(Bundle savedInstanceState) {
+            final Activity emulationActivity = Objects.requireNonNull(getActivity());
+
+            final String title = Objects.requireNonNull(Objects.requireNonNull(getArguments()).getString("title"));
+            final String message = Objects.requireNonNull(Objects.requireNonNull(getArguments()).getString("message"));
+
+            return new AlertDialog.Builder(emulationActivity)
+                    .setTitle(title)
+                    .setMessage(message)
+                    .setPositiveButton(R.string.continue_button, (dialog, which) -> {
+                        coreErrorAlertResult = true;
+                        synchronized (coreErrorAlertLock) {
+                            coreErrorAlertLock.notify();
+                        }
+                    })
+                    .setNegativeButton(R.string.abort_button, (dialog, which) -> {
+                        coreErrorAlertResult = false;
+                        synchronized (coreErrorAlertLock) {
+                            coreErrorAlertLock.notify();
+                        }
+                    }).setOnDismissListener(dialog -> {
+                coreErrorAlertResult = true;
+                synchronized (coreErrorAlertLock) {
+                    coreErrorAlertLock.notify();
+                }
+            }).create();
+        }
+    }
+
+    private static void OnCoreErrorImpl(String title, String message) {
+        final EmulationActivity emulationActivity = sEmulationActivity.get();
+        if (emulationActivity == null) {
+            Log.error("[NativeLibrary] EmulationActivity not present");
+            return;
+        }
+
+        CoreErrorDialogFragment fragment = CoreErrorDialogFragment.newInstance(title, message);
+        fragment.show(emulationActivity.getSupportFragmentManager(), "coreError");
+    }
+
+    /**
+     * Handles a core error.
+     * @return true: continue; false: abort
+     */
+    public static boolean OnCoreError(CoreError error, String details) {
+        final EmulationActivity emulationActivity = sEmulationActivity.get();
+        if (emulationActivity == null) {
+            Log.error("[NativeLibrary] EmulationActivity not present");
+            return false;
+        }
+
+        String title, message;
+        switch (error) {
+            case ErrorSystemFiles: {
+                title = emulationActivity.getString(R.string.system_archive_not_found);
+                message = emulationActivity.getString(R.string.system_archive_not_found_message, details.isEmpty() ? emulationActivity.getString(R.string.system_archive_general) : details);
+                break;
+            }
+            case ErrorSavestate: {
+                title = emulationActivity.getString(R.string.save_load_error);
+                message = details;
+                break;
+            }
+            case ErrorUnknown: {
+                title = emulationActivity.getString(R.string.fatal_error);
+                message = emulationActivity.getString(R.string.fatal_error_message);
+                break;
+            }
+            default: {
+                return true;
+            }
+        }
+
+        // Show the AlertDialog on the main thread.
+        emulationActivity.runOnUiThread(() -> OnCoreErrorImpl(title, message));
+
+        // Wait for the lock to notify that it is complete.
+        synchronized (coreErrorAlertLock) {
+            try {
+                coreErrorAlertLock.wait();
+            } catch (Exception ignored) {
+            }
+        }
+
+        return coreErrorAlertResult;
+    }
 
     public static boolean isPortraitMode() {
         return CitraApplication.getAppContext().getResources().getConfiguration().orientation ==
@@ -486,6 +603,19 @@ public final class NativeLibrary {
     public static native void RemoveAmiibo();
 
     public static native void InstallCIAS(String[] path);
+
+    public static final int SAVESTATE_SLOT_COUNT = 10;
+
+    public static final class SavestateInfo {
+        public int slot;
+        public Date time;
+    }
+
+    @Nullable
+    public static native SavestateInfo[] GetSavestateInfo();
+
+    public static native void SaveState(int slot);
+    public static native void LoadState(int slot);
 
     /**
      * Button type for use in onTouchEvent

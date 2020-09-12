@@ -23,6 +23,7 @@
 #include "core/frontend/scope_acquire_context.h"
 #include "core/hle/service/am/am.h"
 #include "core/hle/service/nfc/nfc.h"
+#include "core/savestate.h"
 #include "core/settings.h"
 #include "jni/applets/mii_selector.h"
 #include "jni/applets/swkbd.h"
@@ -93,6 +94,29 @@ static int AlertPromptButton() {
     // Execute the Java method.
     return static_cast<int>(env->CallStaticIntMethod(IDCache::GetNativeLibraryClass(),
                                                      IDCache::GetAlertPromptButton()));
+}
+
+static jobject ToJavaCoreError(Core::System::ResultStatus result) {
+    static const std::map<Core::System::ResultStatus, const char*> CoreErrorNameMap{
+        {Core::System::ResultStatus::ErrorSystemFiles, "ErrorSystemFiles"},
+        {Core::System::ResultStatus::ErrorSavestate, "ErrorSavestate"},
+        {Core::System::ResultStatus::ErrorUnknown, "ErrorUnknown"},
+    };
+
+    const auto name = CoreErrorNameMap.count(result) ? CoreErrorNameMap.at(result) : "ErrorUnknown";
+
+    JNIEnv* env = IDCache::GetEnvForThread();
+    const jclass core_error_class = IDCache::GetCoreErrorClass();
+    return env->GetStaticObjectField(
+        core_error_class, env->GetStaticFieldID(core_error_class, name,
+                                                "Lorg/citra/citra_emu/NativeLibrary$CoreError;"));
+}
+
+static bool HandleCoreError(Core::System::ResultStatus result, const std::string& details) {
+    JNIEnv* env = IDCache::GetEnvForThread();
+    return env->CallStaticBooleanMethod(IDCache::GetNativeLibraryClass(), IDCache::GetOnCoreError(),
+                                        ToJavaCoreError(result),
+                                        env->NewStringUTF(details.c_str())) != JNI_FALSE;
 }
 
 static Camera::NDK::Factory* g_ndk_factory{};
@@ -186,7 +210,20 @@ static Core::System::ResultStatus RunCitra(const std::string& filepath) {
     // Start running emulation
     while (is_running) {
         if (!pause_emulation) {
-            system.RunLoop();
+            const auto result = system.RunLoop();
+            if (result == Core::System::ResultStatus::Success) {
+                continue;
+            }
+            if (result == Core::System::ResultStatus::ShutdownRequested) {
+                return result; // This also exits the emulation activity
+            } else {
+                InputManager::NDKMotionHandler()->DisableSensors();
+                if (!HandleCoreError(result, system.GetStatusDetails())) {
+                    // Frontend requests us to abort
+                    return result;
+                }
+                InputManager::NDKMotionHandler()->EnableSensors();
+            }
         } else {
             // Ensure no audio bleeds out while game is paused
             const float volume = Settings::values.volume;
@@ -618,6 +655,48 @@ void Java_org_citra_citra_1emu_NativeLibrary_InstallCIAS(JNIEnv* env, [[maybe_un
                     });
     for (auto& thread : threads)
         thread.join();
+}
+
+jobjectArray Java_org_citra_citra_1emu_NativeLibrary_GetSavestateInfo(
+    JNIEnv* env, [[maybe_unused]] jclass clazz) {
+    const jclass date_class = env->FindClass("java/util/Date");
+    const auto date_constructor = env->GetMethodID(date_class, "<init>", "(J)V");
+
+    const jclass savestate_info_class = IDCache::GetSavestateInfoClass();
+    const auto slot_field = env->GetFieldID(savestate_info_class, "slot", "I");
+    const auto date_field = env->GetFieldID(savestate_info_class, "time", "Ljava/util/Date;");
+
+    const Core::System& system{Core::System::GetInstance()};
+    if (!system.IsPoweredOn()) {
+        return nullptr;
+    }
+
+    u64 title_id;
+    if (system.GetAppLoader().ReadProgramId(title_id) != Loader::ResultStatus::Success) {
+        return nullptr;
+    }
+
+    const auto savestates = Core::ListSaveStates(title_id);
+    const jobjectArray array =
+        env->NewObjectArray(static_cast<jsize>(savestates.size()), savestate_info_class, nullptr);
+    for (std::size_t i = 0; i < savestates.size(); ++i) {
+        const jobject object = env->AllocObject(savestate_info_class);
+        env->SetIntField(object, slot_field, static_cast<jint>(savestates[i].slot));
+        env->SetObjectField(object, date_field,
+                            env->NewObject(date_class, date_constructor,
+                                           static_cast<jlong>(savestates[i].time * 1000)));
+
+        env->SetObjectArrayElement(array, i, object);
+    }
+    return array;
+}
+
+void Java_org_citra_citra_1emu_NativeLibrary_SaveState(JNIEnv* env, jclass clazz, jint slot) {
+    Core::System::GetInstance().SendSignal(Core::System::Signal::Save, slot);
+}
+
+void Java_org_citra_citra_1emu_NativeLibrary_LoadState(JNIEnv* env, jclass clazz, jint slot) {
+    Core::System::GetInstance().SendSignal(Core::System::Signal::Load, slot);
 }
 
 } // extern "C"

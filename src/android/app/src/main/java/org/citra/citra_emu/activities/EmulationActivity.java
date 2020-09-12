@@ -14,7 +14,9 @@ import android.view.LayoutInflater;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
+import android.view.SubMenu;
 import android.view.View;
+import android.widget.CheckBox;
 import android.widget.SeekBar;
 import android.widget.TextView;
 
@@ -25,6 +27,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.fragment.app.FragmentActivity;
 
+import org.citra.citra_emu.CitraApplication;
 import org.citra.citra_emu.NativeLibrary;
 import org.citra.citra_emu.R;
 import org.citra.citra_emu.features.settings.model.view.InputBindingSetting;
@@ -300,6 +303,66 @@ public final class EmulationActivity extends AppCompatActivity {
         menu.findItem(R.id.menu_emulation_swap_screens).setChecked(EmulationMenuSettings.getSwapScreens());
         menu.findItem(R.id.menu_emulation_show_overlay).setChecked(EmulationMenuSettings.getShowOverlay());
 
+        return true;
+    }
+
+    private void DisplaySavestateWarning() {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(CitraApplication.getAppContext());
+        if (preferences.getBoolean("savestateWarningShown", false)) {
+            return;
+        }
+
+        LayoutInflater inflater = mEmulationFragment.requireActivity().getLayoutInflater();
+        View view = inflater.inflate(R.layout.dialog_checkbox, null);
+        CheckBox checkBox = view.findViewById(R.id.checkBox);
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.savestate_warning_title)
+                .setMessage(R.string.savestate_warning_message)
+                .setView(view)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    preferences.edit().putBoolean("savestateWarningShown", checkBox.isChecked()).apply();
+                })
+                .show();
+    }
+
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+        super.onPrepareOptionsMenu(menu);
+
+        final NativeLibrary.SavestateInfo[] savestates = NativeLibrary.GetSavestateInfo();
+        if (savestates == null) {
+            menu.findItem(R.id.menu_emulation_save_state).setVisible(false);
+            menu.findItem(R.id.menu_emulation_load_state).setVisible(false);
+            return true;
+        }
+        menu.findItem(R.id.menu_emulation_save_state).setVisible(true);
+        menu.findItem(R.id.menu_emulation_load_state).setVisible(true);
+
+        final SubMenu saveStateMenu = menu.findItem(R.id.menu_emulation_save_state).getSubMenu();
+        final SubMenu loadStateMenu = menu.findItem(R.id.menu_emulation_load_state).getSubMenu();
+        saveStateMenu.clear();
+        loadStateMenu.clear();
+
+        // Update savestates information
+        for (int i = 0; i < NativeLibrary.SAVESTATE_SLOT_COUNT; ++i) {
+            final int slot = i + 1;
+            final String text = getString(R.string.emulation_empty_state_slot, slot);
+            saveStateMenu.add(text).setEnabled(true).setOnMenuItemClickListener((item) -> {
+                DisplaySavestateWarning();
+                NativeLibrary.SaveState(slot);
+                return true;
+            });
+            loadStateMenu.add(text).setEnabled(false).setOnMenuItemClickListener((item) -> {
+                NativeLibrary.LoadState(slot);
+                return true;
+            });
+        }
+        for (final NativeLibrary.SavestateInfo info : savestates) {
+            final String text = getString(R.string.emulation_occupied_state_slot, info.slot, info.time);
+            saveStateMenu.getItem(info.slot - 1).setTitle(text);
+            loadStateMenu.getItem(info.slot - 1).setTitle(text).setEnabled(true);
+        }
         return true;
     }
 
